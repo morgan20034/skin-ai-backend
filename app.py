@@ -51,11 +51,13 @@ try:
         compile=False
     )
 
-    # 🔥 Warmup (กัน request แรกช้า)
+    # 🔥 Warmup image model
     dummy_img = np.zeros((1, 224, 224, 3), dtype=np.float32)
     image_model.predict(dummy_img, verbose=0)
 
-    dummy_sym = np.zeros((1, 20))  # ปรับขนาดตาม input symptom model
+    # 🔥 Warmup symptom model (ดึง input size จริงจากโมเดล)
+    sym_input_dim = symptom_model.input_shape[1]
+    dummy_sym = np.zeros((1, sym_input_dim), dtype=np.float32)
     symptom_model.predict(dummy_sym, verbose=0)
 
     print("✅ Models loaded successfully")
@@ -75,6 +77,8 @@ try:
     IMAGE_CLASSES = classes["image_model"]["class_names"]
     SYMPTOM_CLASSES = classes["checkbox_model"]["class_names"]
     IMAGE_ID2LABEL = classes["image_model"]["id_to_label"]
+
+    print("✅ Classes loaded")
 
 except Exception as e:
     print("❌ Classes load error:", e)
