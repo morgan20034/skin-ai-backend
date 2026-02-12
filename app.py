@@ -3,11 +3,12 @@ import json
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
+from PIL import Image
+import io
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from utils.image_preprocess import preprocess_image
 from utils.symptom_encoder import encode_symptoms
 from utils.fusion import fuse_predictions
 
@@ -35,7 +36,7 @@ print("🚀 Starting Skin AI Backend...")
 
 
 # ==================================================
-# Load Models
+# Load Models (โหลดครั้งเดียวตอน start server)
 # ==================================================
 try:
     print("📦 Loading models...")
@@ -49,6 +50,13 @@ try:
         MODEL_DIR / "checkbox_model_10class.h5",
         compile=False
     )
+
+    # 🔥 Warmup (กัน request แรกช้า)
+    dummy_img = np.zeros((1, 224, 224, 3), dtype=np.float32)
+    image_model.predict(dummy_img, verbose=0)
+
+    dummy_sym = np.zeros((1, 20))  # ปรับขนาดตาม input symptom model
+    symptom_model.predict(dummy_sym, verbose=0)
 
     print("✅ Models loaded successfully")
 
@@ -74,7 +82,7 @@ except Exception as e:
 
 
 # ==================================================
-# Health Check (Render ใช้เช็คว่า Service ทำงานไหม)
+# Health Check
 # ==================================================
 @app.get("/")
 def root():
@@ -97,27 +105,18 @@ async def predict(
     try:
         print("📥 Received prediction request")
 
-        # ---------- Image ----------
         image_bytes = await image.read()
         if not image_bytes:
             raise ValueError("Empty image file")
 
-        # 🔥 เพิ่มส่วนนี้: resize ก่อนเข้า model
-        from PIL import Image
-        import io
-
+        # ---------- Image ----------
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        img = img.resize((224, 224))  # ปรับตามขนาดโมเดล
+        img = img.resize((224, 224))
 
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG")
-        resized_bytes = buffer.getvalue()
+        img_array = np.array(img, dtype=np.float32) / 255.0
+        img_tensor = np.expand_dims(img_array, axis=0)
 
-        img_tensor = preprocess_image(resized_bytes)
         img_pred = image_model.predict(img_tensor, verbose=0)[0]
-
-        if len(img_pred) != len(IMAGE_CLASSES):
-            raise ValueError("Image model output size mismatch")
 
         # ---------- Symptoms ----------
         symptom_list = [s.strip() for s in symptoms.split(",") if s.strip()]
@@ -131,7 +130,7 @@ async def predict(
 
         sym_pred = symptom_model.predict(sym_vec, verbose=0)[0]
 
-        # ---------- Align 10 → 11 classes ----------
+        # ---------- Align class size ----------
         sym_full = np.zeros(len(IMAGE_CLASSES), dtype="float32")
 
         for i, cls in enumerate(SYMPTOM_CLASSES):
@@ -165,7 +164,7 @@ async def predict(
 
 
 # ==================================================
-# Local Run (ใช้ตอนรันในเครื่องเท่านั้น)
+# Local Run
 # ==================================================
 if __name__ == "__main__":
     import uvicorn
