@@ -1,17 +1,19 @@
+import os
+import json
+import numpy as np
+import tensorflow as tf
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import tensorflow as tf
-import numpy as np
-import json
 
 from utils.image_preprocess import preprocess_image
 from utils.symptom_encoder import encode_symptoms
 from utils.fusion import fuse_predictions
 
 
-# --------------------------------------------------
-# App setup
-# --------------------------------------------------
+# ==================================================
+# App Setup
+# ==================================================
 app = FastAPI(title="Skin AI API")
 
 app.add_middleware(
@@ -22,28 +24,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("✅ Loading models...")
-
-# --------------------------------------------------
-# Load models
-# --------------------------------------------------
-image_model = tf.keras.models.load_model("models/best_model.h5")
-symptom_model = tf.keras.models.load_model("models/checkbox_model_10class.h5")
-
-SCHEMA_PATH = "models/symptom_schema.json"
-CLASSES_PATH = "models/classes.json"
-
-with open(CLASSES_PATH, "r", encoding="utf-8") as f:
-    classes_config = json.load(f)
-
-image_class_names = classes_config["image_model"]["class_names"]
-
-print("✅ Models loaded successfully")
+print("🚀 Starting Skin AI Backend...")
 
 
-# --------------------------------------------------
+# ==================================================
+# Load Models
+# ==================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+IMAGE_MODEL_PATH = os.path.join(BASE_DIR, "models", "best_model.h5")
+SYMPTOM_MODEL_PATH = os.path.join(BASE_DIR, "models", "checkbox_model_10class.h5")
+SCHEMA_PATH = os.path.join(BASE_DIR, "models", "symptom_schema.json")
+CLASSES_PATH = os.path.join(BASE_DIR, "models", "classes.json")
+
+try:
+    print("📦 Loading models...")
+
+    image_model = tf.keras.models.load_model(IMAGE_MODEL_PATH)
+    symptom_model = tf.keras.models.load_model(SYMPTOM_MODEL_PATH)
+
+    with open(CLASSES_PATH, "r", encoding="utf-8") as f:
+        classes_config = json.load(f)
+
+    image_class_names = classes_config["image_model"]["class_names"]
+
+    print("✅ Models loaded successfully")
+
+except Exception as e:
+    print("❌ Model loading failed:", e)
+    raise e
+
+
+# ==================================================
+# Health Check (Render ใช้เช็คว่า service ทำงานไหม)
+# ==================================================
+@app.get("/")
+def health_check():
+    return {"status": "Skin AI backend is running 🚀"}
+
+
+# ==================================================
 # Predict API
-# --------------------------------------------------
+# ==================================================
 @app.post("/predict")
 async def predict(
     image: UploadFile = File(...),
@@ -53,18 +75,13 @@ async def predict(
     try:
         print("📥 Received request")
 
-        # ==================================================
-        # 1) Read image
-        # ==================================================
+        # 1️⃣ Read image
         image_bytes = await image.read()
         if not image_bytes:
             raise ValueError("Empty image file")
 
-        # ==================================================
-        # 2) Image model (11 classes)
-        # ==================================================
+        # 2️⃣ Image model (11 classes)
         image_tensor = preprocess_image(image_bytes)
-
         image_probs = image_model.predict(image_tensor)
         image_probs = np.squeeze(image_probs)
 
@@ -73,9 +90,7 @@ async def predict(
 
         print("🖼 Image prediction OK")
 
-        # ==================================================
-        # 3) Parse symptoms & areas (รองรับทั้ง CSV และ JSON)
-        # ==================================================
+        # 3️⃣ Parse symptoms & areas
         try:
             selected_symptoms = json.loads(symptoms) if symptoms else []
         except:
@@ -89,9 +104,7 @@ async def predict(
         print("🧠 Symptoms:", selected_symptoms)
         print("📍 Areas:", selected_areas)
 
-        # ==================================================
-        # 4) Symptom model (10 classes)
-        # ==================================================
+        # 4️⃣ Symptom model (10 classes)
         symptom_tensor = encode_symptoms(
             selected_symptoms,
             selected_areas,
@@ -106,9 +119,7 @@ async def predict(
 
         print("🧾 Symptom prediction OK")
 
-        # ==================================================
-        # 5) Fusion (60% image / 40% symptom)
-        # ==================================================
+        # 5️⃣ Fusion
         fused_probs = fuse_predictions(
             image_pred=image_probs,
             symptom_pred=symptom_probs
@@ -116,11 +127,8 @@ async def predict(
 
         print("🔀 Fusion OK")
 
-        # ==================================================
-        # 6) Sort result
-        # ==================================================
+        # 6️⃣ Sort result
         class_indices = np.argsort(fused_probs)[::-1]
-
         top_index = int(class_indices[0])
         top_score = float(fused_probs[top_index])
 
@@ -147,3 +155,15 @@ async def predict(
     except Exception as e:
         print("❌ BACKEND ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================================================
+# Local Run (สำหรับรันในเครื่องเท่านั้น)
+# ==================================================
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
