@@ -4,4 +4,5 @@ tensorflow
 numpy
 pillow
 python-multipart
+gunicorn
 pydantic
