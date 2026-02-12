@@ -102,7 +102,18 @@ async def predict(
         if not image_bytes:
             raise ValueError("Empty image file")
 
-        img_tensor = preprocess_image(image_bytes)
+        # 🔥 เพิ่มส่วนนี้: resize ก่อนเข้า model
+        from PIL import Image
+        import io
+
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = img.resize((224, 224))  # ปรับตามขนาดโมเดล
+
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG")
+        resized_bytes = buffer.getvalue()
+
+        img_tensor = preprocess_image(resized_bytes)
         img_pred = image_model.predict(img_tensor, verbose=0)[0]
 
         if len(img_pred) != len(IMAGE_CLASSES):
